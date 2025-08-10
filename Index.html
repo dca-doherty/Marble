@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Marble Run Racing Simulator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        #gameContainer {
+            background: rgba(0, 0, 0, 0.9);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            position: relative;
+        }
+
+        canvas {
+            border: 3px solid #fff;
+            border-radius: 10px;
+            display: block;
+        }
+
+        #ui {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            color: white;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+        }
+
+        button {
+            background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%);
+            border: none;
+            color: white;
+            padding: 12px 25px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        #raceInfo {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            color: white;
+            font-size: 16px;
+            text-align: right;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+        }
+
+        .winner-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            font-weight: bold;
+            color: #FFD700;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.8);
+            animation: pulse 1s ease-in-out infinite;
+            display: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.1); }
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="900" height="600"></canvas>
+        <div id="ui">
+            <div>Race: <span id="raceNumber">1</span></div>
+            <div>Championship Points:</div>
+            <div id="scores"></div>
+        </div>
+        <div id="raceInfo">
+            <div id="positions"></div>
+        </div>
+        <div id="controls">
+            <button onclick="startRace()">Start Race</button>
+            <button onclick="resetGame()">Reset Championship</button>
+            <button onclick="toggleTrackType()">Change Track</button>
+        </div>
+        <div class="winner-text" id="winnerText"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Game state
+        let marbles = [];
+        let tracks = [];
+        let racing = false;
+        let raceNumber = 1;
+        let trackType = 'straight';
+        let particles = [];
+        
+        // Marble colors matching the game
+        const marbleColors = [
+            { name: 'Blue', color: '#4444ff', glow: '#6666ff' },
+            { name: 'Red', color: '#ff4444', glow: '#ff6666' },
+            { name: 'Yellow', color: '#ffdd44', glow: '#ffff66' },
+            { name: 'Green', color: '#44ff44', glow: '#66ff66' },
+            { name: 'Purple', color: '#ff44ff', glow: '#ff66ff' },
+            { name: 'Orange', color: '#ff8844', glow: '#ffaa66' }
+        ];
+        
+        class Marble {
+            constructor(x, y, lane, colorData) {
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = 0;
+                this.radius = 12;
+                this.lane = lane;
+                this.color = colorData.color;
+                this.glow = colorData.glow;
+                this.name = colorData.name;
+                this.points = 0;
+                this.finished = false;
+                this.position = 0;
+                this.trail = [];
+            }
+            
+            update() {
+                if (this.finished) return;
+                
+                // Physics
+                this.vy += 0.3; // Gravity
+                this.vx *= 0.99; // Friction
+                this.vy *= 0.99;
+                
+                // Track boundaries and slopes
+                const track = tracks[this.lane];
+                if (track) {
+                    // Follow track path with some randomness
+                    const trackY = track.getY(this.x);
+                    if (this.y < trackY - this.radius) {
+                        this.y += this.vy;
+                        this.x += this.vx;
+                    } else {
+                        // On track
+                        this.y = trackY - this.radius;
+                        const slope = track.getSlope(this.x);
+                        this.vx += slope * 0.5 + (Math.random() - 0.5) * 0.2;
+                        this.vy = Math.min(this.vy, 2);
+                    }
+                    
+                    // Add some bumps and variations
+                    if (Math.random() < 0.02) {
+                        this.vy -= Math.random() * 2;
+                        this.vx += (Math.random() - 0.5) * 2;
+                    }
+                }
+                
+                // Update trail
+                this.trail.push({ x: this.x, y: this.y });
+                if (this.trail.length > 15) {
+                    this.trail.shift();
+                }
+                
+                // Check finish
+                if (this.x > canvas.width - 50) {
+                    this.finished = true;
+                    this.x = canvas.width - 50;
+                    this.addFinishParticles();
+                }
+            }
+            
+            addFinishParticles() {
+                for (let i = 0; i < 20; i++) {
+                    particles.push({
+                        x: this.x,
+                        y: this.y,
+                        vx: (Math.random() - 0.5) * 8,
+                        vy: (Math.random() - 0.5) * 8,
+                        color: this.glow,
+                        life: 1
+                    });
+                }
+            }
+            
+            draw() {
+                // Draw trail
+                ctx.strokeStyle = this.glow;
+                ctx.lineWidth = 2;
+                ctx.globalAlpha = 0.3;
+                ctx.beginPath();
+                this.trail.forEach((point, i) => {
+                    if (i === 0) ctx.moveTo(point.x, point.y);
+                    else ctx.lineTo(point.x, point.y);
+                });
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+                
+                // Draw glow
+                const gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.radius * 2);
+                gradient.addColorStop(0, this.glow);
+                gradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius * 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw marble
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Highlight
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.beginPath();
+                ctx.arc(this.x - 3, this.y - 3, this.radius / 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        class Track {
+            constructor(lane, type) {
+                this.lane = lane;
+                this.type = type;
+                this.points = [];
+                this.color = `hsl(${lane * 60}, 70%, 50%)`;
+                this.generatePath();
+            }
+            
+            generatePath() {
+                this.points = [];
+                const segments = 20;
+                for (let i = 0; i <= segments; i++) {
+                    const x = (canvas.width / segments) * i;
+                    let y;
+                    
+                    if (this.type === 'straight') {
+                        y = 100 + this.lane * 80 + Math.sin(i * 0.5) * 10;
+                    } else if (this.type === 'wavy') {
+                        y = 100 + this.lane * 80 + Math.sin(i * 0.3) * 30;
+                    } else if (this.type === 'bumpy') {
+                        y = 100 + this.lane * 80 + Math.random() * 20;
+                    }
+                    
+                    this.points.push({ x, y });
+                }
+            }
+            
+            getY(x) {
+                for (let i = 0; i < this.points.length - 1; i++) {
+                    if (x >= this.points[i].x && x <= this.points[i + 1].x) {
+                        const t = (x - this.points[i].x) / (this.points[i + 1].x - this.points[i].x);
+                        return this.points[i].y + t * (this.points[i + 1].y - this.points[i].y);
+                    }
+                }
+                return this.points[this.points.length - 1].y;
+            }
+            
+            getSlope(x) {
+                for (let i = 0; i < this.points.length - 1; i++) {
+                    if (x >= this.points[i].x && x <= this.points[i + 1].x) {
+                        return (this.points[i + 1].y - this.points[i].y) / (this.points[i + 1].x - this.points[i].x);
+                    }
+                }
+                return 0;
+            }
+            
+            draw() {
+                // Track glow
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 20;
+                ctx.globalAlpha = 0.3;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                this.points.forEach((point, i) => {
+                    if (i === 0) ctx.moveTo(point.x, point.y);
+                    else ctx.lineTo(point.x, point.y);
+                });
+                ctx.stroke();
+                
+                // Main track
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 15;
+                ctx.globalAlpha = 1;
+                ctx.beginPath();
+                this.points.forEach((point, i) => {
+                    if (i === 0) ctx.moveTo(point.x, point.y);
+                    else ctx.lineTo(point.x, point.y);
+                });
+                ctx.stroke();
+                
+                // Track highlight
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                this.points.forEach((point, i) => {
+                    if (i === 0) ctx.moveTo(point.x, point.y - 7);
+                    else ctx.lineTo(point.x, point.y - 7);
+                });
+                ctx.stroke();
+            }
+        }
+        
+        function initGame() {
+            marbles = [];
+            tracks = [];
+            
+            // Create tracks
+            for (let i = 0; i < 6; i++) {
+                tracks.push(new Track(i, trackType));
+            }
+            
+            // Create marbles
+            for (let i = 0; i < 6; i++) {
+                const marble = new Marble(50, 100 + i * 80, i, marbleColors[i]);
+                marbles.push(marble);
+            }
+            
+            updateScores();
+        }
+        
+        function startRace() {
+            if (racing) return;
+            
+            racing = true;
+            marbles.forEach(m => {
+                m.x = 50;
+                m.y = 100 + m.lane * 80;
+                m.vx = Math.random() * 2 + 3;
+                m.vy = 0;
+                m.finished = false;
+                m.trail = [];
+            });
+            
+            document.getElementById('winnerText').style.display = 'none';
+        }
+        
+        function resetGame() {
+            racing = false;
+            raceNumber = 1;
+            document.getElementById('raceNumber').textContent = raceNumber;
+            marbles.forEach(m => m.points = 0);
+            initGame();
+        }
+        
+        function toggleTrackType() {
+            const types = ['straight', 'wavy', 'bumpy'];
+            const currentIndex = types.indexOf(trackType);
+            trackType = types[(currentIndex + 1) % types.length];
+            initGame();
+        }
+        
+        function updateScores() {
+            const scoresDiv = document.getElementById('scores');
+            scoresDiv.innerHTML = marbles
+                .map(m => `<div style="color: ${m.glow}">${m.name}: ${m.points}</div>`)
+                .join('');
+        }
+        
+        function updatePositions() {
+            const posDiv = document.getElementById('positions');
+            const sorted = [...marbles].sort((a, b) => b.x - a.x);
+            posDiv.innerHTML = '<div>Current Positions:</div>' + 
+                sorted.map((m, i) => `<div style="color: ${m.glow}">${i + 1}. ${m.name}</div>`).join('');
+        }
+        
+        function checkRaceEnd() {
+            const allFinished = marbles.every(m => m.finished);
+            if (allFinished && racing) {
+                racing = false;
+                
+                // Award points
+                const sorted = [...marbles].sort((a, b) => b.x - a.x);
+                const points = [10, 6, 4, 3, 2, 1];
+                sorted.forEach((m, i) => {
+                    m.points += points[i] || 0;
+                    m.position = i + 1;
+                });
+                
+                // Show winner
+                const winner = sorted[0];
+                const winnerText = document.getElementById('winnerText');
+                winnerText.textContent = `${winner.name} Wins Race ${raceNumber}!`;
+                winnerText.style.color = winner.glow;
+                winnerText.style.display = 'block';
+                
+                raceNumber++;
+                document.getElementById('raceNumber').textContent = raceNumber;
+                updateScores();
+                
+                setTimeout(() => {
+                    winnerText.style.display = 'none';
+                }, 3000);
+            }
+        }
+        
+        function updateParticles() {
+            particles = particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.3;
+                p.life -= 0.02;
+                return p.life > 0;
+            });
+        }
+        
+        function drawParticles() {
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+        }
+        
+        function gameLoop() {
+            // Clear canvas
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw tracks
+            tracks.forEach(track => track.draw());
+            
+            // Draw finish line
+            ctx.strokeStyle = '#FFD700';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([10, 5]);
+            ctx.beginPath();
+            ctx.moveTo(canvas.width - 50, 0);
+            ctx.lineTo(canvas.width - 50, canvas.height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Update and draw marbles
+            if (racing) {
+                marbles.forEach(marble => marble.update());
+                updatePositions();
+                checkRaceEnd();
+            }
+            
+            marbles.forEach(marble => marble.draw());
+            
+            // Update and draw particles
+            updateParticles();
+            drawParticles();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Initialize and start
+        initGame();
+        gameLoop();
+    </script>
+</body>
+</html>
